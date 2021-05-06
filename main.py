@@ -2,10 +2,11 @@ import meep as mp
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
+import copy
 
 C = 299_792_458
 
-resolution = 1/5 # pixels/um
+resolution = 1/10 # pixels/um
 
 sx = 270 # um
 sy = 270 # um
@@ -15,15 +16,19 @@ cell = mp.Vector3(sx,sy,sz)
 dpml = 120 # um
 pml_layers = [mp.PML(dpml, direction=mp.Z)]
 
-w = 10 # width of object
+w = 10 # width of object (um)
 
 fcen = 1/((C/0.7e12)*1e6)  # pulse center frequency
 df = 1/((C/1e12)*1e6)    # pulse width (in frequency)
 sources = [
-    mp.Source(mp.GaussianSource(fcen,fwidth=df,is_integrated=True),
-                     component=mp.Ex,
-                     center=mp.Vector3(0,0,-200),
-                     size=mp.Vector3(x=sx, y=sy)),
+    mp.Source(
+        mp.GaussianSource(
+            fcen,fwidth=df,is_integrated=True
+        ),
+        component=mp.Ex,
+        center=mp.Vector3(0,0,-200),
+        size=mp.Vector3(x=sx, y=sy)
+    ),
 ]
 
 time = 100e3
@@ -58,16 +63,18 @@ def get_trans_ref():
     # sim.run(until_after_sources=mp.stop_when_fields_decayed(50,mp.Ex,pt,1e-3))
     sim.run(until=time)
 
-    straight_tran_flux = sim.get_flux_data(tran)
+    straight_tran_flux = copy.deepcopy(sim.get_flux_data(tran))
+
+    del sim
 
     return straight_tran_flux
 
 def get_refl_ref():
     geometry = [
-        # mp.Block(
-        # size=mp.Vector3(mp.inf, mp.inf, w),
-        # center=mp.Vector3(0,0,0),
-        # material=mp.perfect_electric_conductor),
+        mp.Block(
+        size=mp.Vector3(mp.inf, mp.inf, w),
+        center=mp.Vector3(0,0,0),
+        material=mp.perfect_electric_conductor),
     ]
 
     sim = mp.Simulation(cell_size=cell,
@@ -82,10 +89,11 @@ def get_refl_ref():
     refl = sim.add_flux(fcen, df, nfreq, refl_fr)
 
     pt = mp.Vector3(0,0,-400)
-    # sim.run(until_after_sources=mp.stop_when_fields_decayed(50,mp.Ex,pt,1e-3))
     sim.run(until=time)
 
-    straight_refl_data = sim.get_flux_data(refl)
+    straight_refl_data = copy.deepcopy(sim.get_flux_data(refl))
+
+    del sim
 
     return straight_refl_data
 
@@ -97,7 +105,7 @@ def get_signal(straight_refl_data):
     ]
 
     mask = np.ones((sx, sy, w), dtype=np.int8)
-    mask[60:-60,60:-60,:] = 0
+    mask[70:-70,70:-70,:] = 0
     # mask = load_mask('0.png', (sx, sy, w)) # define metal-mesh pattern from image.
 
     masks = [
@@ -139,16 +147,18 @@ def get_signal(straight_refl_data):
         refl = sim.add_flux(fcen, df, nfreq, refl_fr)
         tran = sim.add_flux(fcen, df, nfreq, tran_fr)
 
-        sim.load_minus_flux_data(refl, straight_refl_data)
+        # sim.load_minus_flux_data(refl, straight_refl_data)
 
         pt = mp.Vector3(0,0,-400)
-        # sim.run(until_after_sources=mp.stop_when_fields_decayed(50,mp.Ex,pt,1e-3))
         sim.run(until=time)
 
         tran_flux = sim.get_flux_data(tran)
         refl_flux = sim.get_flux_data(refl)
 
-        data.append([tran_flux, refl_flux])
+        data.append([
+            copy.deepcopy(tran_flux), 
+            copy.deepcopy(refl_flux)
+        ])
 
         sim.plot2D(fields=mp.Ex, output_plane=mp.Volume(center=mp.Vector3(0,0,0), size=mp.Vector3(sx, 0, sz)))
         plt.savefig('Ex_xz_{}.png'.format(deg[i]))
@@ -158,6 +168,8 @@ def get_signal(straight_refl_data):
 
         sim.plot2D(fields=mp.Ex, output_plane=mp.Volume(center=mp.Vector3(0,0,0), size=mp.Vector3(sx, sy, 0)))
         plt.savefig('Ex_xy_{}.png'.format(deg[i]))
+
+        del sim
 
     return data, mp.get_flux_freqs(tran)
 
@@ -221,17 +233,25 @@ if mp.am_master():
     plt.close()
 
 wl = (C/np.array(f))
+print(wl)
 k = 2*np.pi / wl
-Ne = 1/(k*w*1e-6)*np.arccos( (1 - Rs[0]**2 + Ts[0]**2) / 2*Ts[0] )
-No = 1/(k*w*1e-6)*np.arccos( (1 - Rs[1]**2 + Ts[1]**2) / 2*Ts[1] )
+S11 = np.abs(Rs)**2 * np.exp( 1j*np.unwrap( np.angle(Rs) ) )
+S21 = np.abs(Ts)**2 * np.exp( 1j*np.unwrap( np.angle(Ts) ) )
+Ne = 1/(k*w*1e-6)*np.arccos( (1 - S11[0]**2 + S21[0]**2) / 2*S21[0] )
+No = 1/(k*w*1e-6)*np.arccos( (1 - S11[1]**2 + S21[1]**2) / 2*S21[1] )
+# Ne = 1/(k*w*1e-6)*np.arccos( (1 - Rs[0]**2 + Ts[0]**2) / 2*Ts[0]**2 )
+# No = 1/(k*w*1e-6)*np.arccos( (1 - Rs[1]**2 + Ts[1]**2) / 2*Ts[1]**2 )
 N = Ne.real - No.real
+print(Ne.real, No.real, 1/(k*w*1e-6), w*1e-6)
 if mp.am_master():
     plt.figure()
-    plt.plot(f*1e-12,N,'b-')
+    plt.plot(f*1e-12,N,'b-',label='Re($\Delta n = n_e - n_o$)')
+    plt.plot(f*1e-12,Ne.real,'g-',label='Re($n_e$)')
+    plt.plot(f*1e-12,No.real,'r-',label='Re($n_o$)')
     # plt.ylim(-5,5)
     plt.xlim(0.5, 1)
     plt.xlabel("Freq (THz)")
-    plt.ylabel("$\Delta n$ (-)")
+    plt.ylabel("$n$ (-)")
     plt.legend()
     plt.savefig('N_delta.png')
     plt.close()
