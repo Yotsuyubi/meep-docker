@@ -35,6 +35,34 @@ time = 100e3
 nfreq = 300  # number of frequencies at which to compute flux
 
 
+def fresnel(freq, neffe, zeffe, d):
+
+    n1 = np.ones(freq.shape) * 1.0
+    n2 = neffe
+    n3 = n1
+
+    k1 = 2.0 * np.pi * freq * n1 / C
+    k2 = 2.0 * np.pi * freq * n2 / C
+    k3 = 2.0 * np.pi * freq * n3 / C
+
+    Z1 = 1 / n1
+    Z2 = zeffe
+    Z3 = 1 / n3
+
+    t12 = 2 * Z2 / ( Z1 + Z2 )
+    t23 = 2 * Z3 / ( Z2 + Z3 )
+
+    r12 = ( Z2 - Z1 ) / ( Z1 + Z2 )
+    r23 = ( Z3 - Z2 ) / ( Z2 + Z3 )
+
+    P2 = np.exp( 1j * k2 * d )
+
+    t123 = ( t12 * t23 * P2 ) / ( 1 + r12 * r23 * P2**2 )
+    r123 = ( r12 + r23 * P2**2 ) / ( 1 + r12 * r23 * P2**2 )
+
+    return t123, r123
+
+
 def load_mask(path, size):
     im = Image.open(path)
     im = im.resize((size[0], size[1]))
