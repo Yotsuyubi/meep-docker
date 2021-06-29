@@ -15,6 +15,7 @@ export PYTHONPATH="$HOME/install/meep/python" \
 export GUILE_WARN_DEPRECATED="no" \
 export MPLBACKEND=Agg' >> ~/.bashrc
 RUN mkdir /home/hostSRC
+RUN pip3 install torch
 VOLUME /home/hostSRC
 
 WORKDIR /home/hostSRC
